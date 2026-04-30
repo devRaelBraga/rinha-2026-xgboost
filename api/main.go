@@ -5,8 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -64,13 +68,50 @@ func main() {
 	ready = true
 	log.Println("Model loaded, API is ready!")
 
-	// Register handlers
-	http.HandleFunc("/ready", readyHandler)
-	http.HandleFunc("/fraud-score", fraudScoreHandler)
-
-	addr := fmt.Sprintf(":%s", *port)
-	log.Printf("Listening on %s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Pega o ID da instância pelo ENV (ex: "1", "2")
+	instanceID := os.Getenv("INSTANCE_ID")
+	if instanceID == "" {
+		instanceID = "1" // fallback
 	}
+
+	// Define o caminho do socket no volume compartilhado
+	sockPath := fmt.Sprintf("/tmp/sockets/api%s.sock", instanceID)
+
+	// IMPORTANTE: Limpa o socket antigo se o container reiniciou e o arquivo ficou lá
+	os.Remove(sockPath)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ready", readyHandler)
+	mux.HandleFunc("/fraud-score", fraudScoreHandler)
+
+	srv := &http.Server{
+		Handler:      mux,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+
+	// Cria o listener do tipo "unix"
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		log.Fatalf("Failed to listen on socket: %v", err)
+	}
+
+	// Garante que o Nginx tenha permissão para ler/escrever no socket
+	os.Chmod(sockPath, 0777)
+
+	log.Printf("Listening on Unix Socket: %s", sockPath)
+
+	// Inicia o servidor no socket
+	go func() {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Limpeza graciosa ao desligar o container
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	os.Remove(sockPath)
 }
