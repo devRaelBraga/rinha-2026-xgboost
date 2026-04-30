@@ -36,6 +36,8 @@ COPY --from=builder /server /server
 COPY training/output/model.json /data/model.json
 COPY resources/mcc_risk.json /data/mcc_risk.json
 COPY resources/normalization.json /data/normalization.json
+COPY training/output/refs_vectors.bin /data/refs_vectors.bin
+COPY training/output/refs_labels.bin /data/refs_labels.bin
 
 EXPOSE 8080
 CMD ["/server", "--model", "/data/model.json", "--port", "8080"]

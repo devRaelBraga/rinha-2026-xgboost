@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // Global state (initialized in main.go)
@@ -80,7 +81,16 @@ func fraudScoreHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if fraudScore < 0.4 {
 		w.Write(approvedBody)
-	} else {
+	} else if fraudScore > 0.6 {
 		w.Write(disapprovedBody)
+	} else {
+		startTime := time.Now()
+		knnScore := knnIndex.Search(vector, 5)
+		println("knnScore", knnScore, "time", time.Since(startTime).String())
+		if knnScore < 0.6 {
+			w.Write(approvedBody)
+		} else {
+			w.Write(disapprovedBody)
+		}
 	}
 }
