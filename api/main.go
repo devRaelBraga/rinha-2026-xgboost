@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 )
 
 func main() {
+	runtime.GOMAXPROCS(1)
 	modelPath := flag.String("model", "/data/model.json", "Path to XGBoost model file")
 	normPath := flag.String("normalization", "/data/normalization.json", "Path to normalization.json")
 	mccPath := flag.String("mcc-risk", "/data/mcc_risk.json", "Path to mcc_risk.json")
