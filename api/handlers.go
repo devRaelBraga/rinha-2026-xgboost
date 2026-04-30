@@ -8,10 +8,17 @@ import (
 
 // Global state (initialized in main.go)
 var (
-	predictor  *Predictor
-	normConfig Normalization
-	mccRiskMap map[string]float64
-	ready      bool
+	predictor               *Predictor
+	normConfig              Normalization
+	mccRiskMap              map[string]float64
+	ready                   bool
+	InvMaxInstallments      float64
+	InvMaxAmount            float64
+	InvAmountVsAvgRatio     float64
+	InvMaxMinutes           float64
+	InvMaxKm                float64
+	InvMaxTxCount24h        float64
+	InvMaxMerchantAvgAmount float64
 )
 
 // Pool for FraudRequest objects to reduce GC pressure.
@@ -32,7 +39,8 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	safeDefaultJSON = []byte(`{"approved":true,"fraud_score":0.0}`)
+	approvedBody    = []byte(`{"approved":true,"fraud_score":0.0}`)
+	disapprovedBody = []byte(`{"approved":false,"fraud_score":1.0}`)
 )
 
 // fraudScoreHandler receives a transaction payload and returns the fraud decision.
@@ -45,16 +53,16 @@ func fraudScoreHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode request
 	req := requestPool.Get().(*FraudRequest)
 	defer func() {
-		// Reset the object before returning to pool
-		req.LastTx = nil
-		req.Customer.KnownMerchants = req.Customer.KnownMerchants[:0]
+		merchants := req.Customer.KnownMerchants[:0]
+		*req = FraudRequest{}
+		req.Customer.KnownMerchants = merchants
 		requestPool.Put(req)
 	}()
 
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		// Return a safe default instead of HTTP error (errors cost 5x in scoring)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(safeDefaultJSON)
+		w.Write(approvedBody)
 		return
 	}
 
@@ -64,15 +72,15 @@ func fraudScoreHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		// Fast fallback for timeouts or load shedding
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(safeDefaultJSON)
+		w.Write(approvedBody)
 		return
 	}
-	approved := fraudScore < 0.3
 
 	// Respond
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FraudResponse{
-		Approved:   approved,
-		FraudScore: fraudScore,
-	})
+	if fraudScore < 0.4 {
+		w.Write(approvedBody)
+	} else {
+		w.Write(disapprovedBody)
+	}
 }

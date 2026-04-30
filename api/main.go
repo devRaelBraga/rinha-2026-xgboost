@@ -33,6 +33,14 @@ func main() {
 		log.Fatalf("Failed to parse normalization.json: %v", err)
 	}
 
+	InvMaxInstallments = 1.0 / normConfig.MaxInstallments
+	InvMaxAmount = 1.0 / normConfig.MaxAmount
+	InvAmountVsAvgRatio = 1.0 / normConfig.AmountVsAvgRatio
+	InvMaxMinutes = 1.0 / normConfig.MaxMinutes
+	InvMaxKm = 1.0 / normConfig.MaxKm
+	InvMaxTxCount24h = 1.0 / normConfig.MaxTxCount24h
+	InvMaxMerchantAvgAmount = 1.0 / normConfig.MaxMerchantAvgAmount
+
 	// Load MCC risk map
 	log.Println("Loading MCC risk map...")
 	mccData, err := os.ReadFile(*mccPath)

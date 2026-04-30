@@ -4,18 +4,18 @@ package main
 
 // FraudRequest is the incoming transaction payload.
 type FraudRequest struct {
-	ID          string       `json:"id"`
-	Transaction Transaction  `json:"transaction"`
-	Customer    Customer     `json:"customer"`
-	Merchant    Merchant     `json:"merchant"`
-	Terminal    Terminal     `json:"terminal"`
+	ID          string           `json:"id"`
+	Transaction Transaction      `json:"transaction"`
+	Customer    Customer         `json:"customer"`
+	Merchant    Merchant         `json:"merchant"`
+	Terminal    Terminal         `json:"terminal"`
 	LastTx      *LastTransaction `json:"last_transaction"`
 }
 
 type Transaction struct {
-	Amount      float64 `json:"amount"`
-	Installments int    `json:"installments"`
-	RequestedAt string  `json:"requested_at"`
+	Amount       float64 `json:"amount"`
+	Installments int     `json:"installments"`
+	RequestedAt  string  `json:"requested_at"`
 }
 
 type Customer struct {
@@ -49,11 +49,11 @@ type FraudResponse struct {
 
 // Normalization constants loaded from normalization.json.
 type Normalization struct {
-	MaxAmount           float64 `json:"max_amount"`
-	MaxInstallments     float64 `json:"max_installments"`
-	AmountVsAvgRatio    float64 `json:"amount_vs_avg_ratio"`
-	MaxMinutes          float64 `json:"max_minutes"`
-	MaxKm               float64 `json:"max_km"`
-	MaxTxCount24h       float64 `json:"max_tx_count_24h"`
+	MaxAmount            float64 `json:"max_amount"`
+	MaxInstallments      float64 `json:"max_installments"`
+	AmountVsAvgRatio     float64 `json:"amount_vs_avg_ratio"`
+	MaxMinutes           float64 `json:"max_minutes"`
+	MaxKm                float64 `json:"max_km"`
+	MaxTxCount24h        float64 `json:"max_tx_count_24h"`
 	MaxMerchantAvgAmount float64 `json:"max_merchant_avg_amount"`
 }
