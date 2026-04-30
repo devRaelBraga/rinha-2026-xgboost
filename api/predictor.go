@@ -130,10 +130,10 @@ func (p *Predictor) Predict(features [14]float32) (float64, bool) {
 		case res := <-resChan:
 			return res, true
 		case <-time.After(50 * time.Millisecond):
-			return 1.0, true
+			return 0.0, true
 		}
 	default:
-		return 1.0, true
+		return 0.0, true
 	}
 }
 

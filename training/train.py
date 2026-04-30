@@ -10,6 +10,7 @@ Strategy (Option B):
 5. Export model as model.json (readable by XGBoost C API)
 """
 
+from time import time
 import argparse
 import gc
 import gzip
@@ -18,7 +19,6 @@ import os
 import time
 
 import numpy as np
-import xgboost as xgb
 from sklearn.model_selection import train_test_split
 
 
@@ -66,7 +66,6 @@ def compute_knn_scores(vectors: np.ndarray, labels: np.ndarray, k: int = 5, batc
     # Use all available CPU cores for FAISS
     n_threads = os.cpu_count() or 8
     faiss.omp_set_num_threads(n_threads)
-
     # IVFFlat: partition vectors into nlist cells, then search nprobe cells per query.
     # nlist=1024, nprobe=32: searches ~3% of cells → ~30x faster than brute force.
     # For training labels, ~99% recall is more than sufficient.
@@ -81,7 +80,7 @@ def compute_knn_scores(vectors: np.ndarray, labels: np.ndarray, k: int = 5, batc
 
     # IVF requires training on a sample of vectors
     print("    Training IVF quantizer...")
-    index.train(vectors)
+    index.train(vectors[:nlist * 40])
     index.add(vectors)
     index.nprobe = nprobe
     print(f"    Index built in {time.time() - t0:.1f}s")
@@ -104,8 +103,14 @@ def compute_knn_scores(vectors: np.ndarray, labels: np.ndarray, k: int = 5, batc
 
         # Skip the first neighbor (self-match), take the next k
         neighbor_indices = indices[:, 1 : search_k]
+        dist_to_neighbors = _distances[:, 1:search_k]
+        # Use inverse distance as weight (add epsilon to avoid div by zero)
+        weights = 1.0 / (dist_to_neighbors + 1e-6)
         neighbor_labels = labels[neighbor_indices]
-        fraud_scores[start:end] = neighbor_labels.sum(axis=1) / k
+
+        weighted_sum = (neighbor_labels * weights).sum(axis=1)
+        total_weight = weights.sum(axis=1)
+        fraud_scores[start:end] = weighted_sum / total_weight
 
         progress = end / n * 100
         print(f"    Batch {batch_idx+1}/{n_batches}: {end}/{n} ({progress:.1f}%) - {batch_elapsed:.1f}s")
@@ -135,102 +140,11 @@ def load_knn_scores(path: str):
         return np.load(path)
     return None
 
-
-def train_xgboost(vectors: np.ndarray, fraud_scores: np.ndarray, params: dict = None):
-    print(f"[4/5] Training XGBoost regressor (vectors shape: {vectors.shape})...")
-    t0 = time.time()
-
-    # Data validation
-    print("    Validating data...")
-    if np.any(np.isnan(vectors)):
-        print("    WARNING: NaN values found in vectors!")
-    if np.any(np.isinf(vectors)):
-        print("    WARNING: Inf values found in vectors!")
-    
-    print(f"    Vector range: [{np.min(vectors):.3f}, {np.max(vectors):.3f}]")
-    print(f"    Scores range: [{np.min(fraud_scores):.3f}, {np.max(fraud_scores):.3f}]")
-
-    # 1. Validation Split (90/10)
-    print("    Splitting data for validation...")
-    X_train, X_val, y_train, y_val = train_test_split(
-        vectors, fraud_scores, test_size=0.1, random_state=42
-    )
-
-    print("    Creating DMatrices...")
-    dtrain = xgb.DMatrix(X_train, label=y_train, nthread=4)
-    dval = xgb.DMatrix(X_val, label=y_val, nthread=4)
-
-    if params is None:
-        params = {
-            "objective": "reg:squarederror",
-            "max_depth": 6,
-            "eta": 0.05,
-            "lambda": 1.5,
-            "alpha": 0.5,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "min_child_weight": 5,
-            "tree_method": "hist",
-            "nthread": 4,
-            "verbosity": 1,
-        }
-
-    num_boost_round = 1500
-
-    # 2. Training with Early Stopping
-    model = xgb.train(
-        params,
-        dtrain,
-        num_boost_round=num_boost_round,
-        evals=[(dtrain, "train"), (dval, "val")],
-        early_stopping_rounds=25,
-        verbose_eval=50,
-    )
-
-    elapsed = time.time() - t0
-    print(f"    Training completed in {elapsed:.1f}s")
-
-    # Quick accuracy check on training data (using full set for comparison)
-    dfull = xgb.DMatrix(vectors, nthread=4)
-    predictions = model.predict(dfull)
-    # Round to nearest 0.2 to match k-NN output space
-    rounded = np.clip(predictions, 0.0, 1.0)
-
-    exact_match = (rounded == fraud_scores).mean()
-    approval_match = ((rounded < 0.6) == (fraud_scores < 0.6)).mean()
-    print(f"    Exact score match (rounded): {exact_match:.2%}")
-    print(f"    Approval decision match:     {approval_match:.2%}")
-
-    return model
-
-
-def export_model(model: xgb.Booster, output_dir: str):
-    """Export model in JSON format (readable by XGBoost C API)."""
-    print(f"[5/5] Exporting model to {output_dir}...")
-    os.makedirs(output_dir, exist_ok=True)
-
-    json_path = os.path.join(output_dir, "model.json")
-    model.save_model(json_path)
-    json_size = os.path.getsize(json_path) / 1024 / 1024
-    print(f"    model.json: {json_size:.1f} MB")
-
-    ubj_path = os.path.join(output_dir, "model.ubj")
-    model.save_model(ubj_path)
-    ubj_size = os.path.getsize(ubj_path) / 1024 / 1024
-    print(f"    model.ubj:  {ubj_size:.1f} MB")
-
-    bin_path = os.path.join(output_dir, "model.bin")
-    # Force legacy binary format for compatibility with the 'leaves' Go library
-    model.save_model(bin_path, format="deprecated")
-    bin_size = os.path.getsize(bin_path) / 1024 / 1024
-    print(f"    model.bin:  {bin_size:.1f} MB (legacy format)")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Train XGBoost fraud score regressor")
     parser.add_argument(
         "--references",
-        default="resources/references.json.gz",
+        default="./resources/references.json.gz",
         help="Path to references.json.gz",
     )
     parser.add_argument(
@@ -268,6 +182,103 @@ def main():
     # Cleanup labels as they are no longer needed for XGBoost
     del labels
     gc.collect()
+
+    import xgboost as xgb
+
+    def train_xgboost(vectors: np.ndarray, fraud_scores: np.ndarray, params: dict = None):
+        print(f"[4/5] Training XGBoost regressor (vectors shape: {vectors.shape})...")
+        t0 = time.time()
+
+        # Data validation
+        print("    Validating data...")
+        if np.any(np.isnan(vectors)):
+            print("    WARNING: NaN values found in vectors!")
+        if np.any(np.isinf(vectors)):
+            print("    WARNING: Inf values found in vectors!")
+        
+        print(f"    Vector range: [{np.min(vectors):.3f}, {np.max(vectors):.3f}]")
+        print(f"    Scores range: [{np.min(fraud_scores):.3f}, {np.max(fraud_scores):.3f}]")
+
+        # 1. Validation Split (90/10)
+        print("    Splitting data for validation...")
+        X_train, X_val, y_train, y_val = train_test_split(
+            vectors, fraud_scores, test_size=0.1, random_state=42
+        )
+
+        sample_weights = np.ones(len(y_train), dtype=np.float32)
+        # Increase importance of samples near our problematic decision boundary
+        mask = (y_train >= 0.3) & (y_train <= 0.7)
+        sample_weights[mask] = 5.0
+
+        print("    Creating DMatrices...")
+        dtrain = xgb.DMatrix(X_train, label=y_train, nthread=4)
+        dval = xgb.DMatrix(X_val, label=y_val, nthread=4)
+
+        if params is None:
+            params = {
+                "objective": "reg:squarederror",
+                "max_depth": 6,
+                "eta": 0.05,
+                "lambda": 1.5,
+                "alpha": 0.5,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "min_child_weight": 5,
+                "tree_method": "hist",
+                "nthread": 4,
+                "verbosity": 1,
+            }
+
+        num_boost_round = 1500
+
+        # 2. Training with Early Stopping
+        model = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=num_boost_round,
+            evals=[(dtrain, "train"), (dval, "val")],
+            early_stopping_rounds=25,
+            verbose_eval=50,
+        )
+
+        elapsed = time.time() - t0
+        print(f"    Training completed in {elapsed:.1f}s")
+
+        # Quick accuracy check on training data (using full set for comparison)
+        dfull = xgb.DMatrix(vectors, nthread=4)
+        predictions = model.predict(dfull)
+        # Round to nearest 0.2 to match k-NN output space
+        rounded = np.clip(predictions, 0.0, 1.0)
+
+        exact_match = (rounded == fraud_scores).mean()
+        approval_match = ((rounded < 0.6) == (fraud_scores < 0.6)).mean()
+        print(f"    Exact score match (rounded): {exact_match:.2%}")
+        print(f"    Approval decision match:     {approval_match:.2%}")
+
+        return model
+
+
+    def export_model(model: xgb.Booster, output_dir: str):
+        """Export model in JSON format (readable by XGBoost C API)."""
+        print(f"[5/5] Exporting model to {output_dir}...")
+        os.makedirs(output_dir, exist_ok=True)
+
+        json_path = os.path.join(output_dir, "model.json")
+        model.save_model(json_path)
+        json_size = os.path.getsize(json_path) / 1024 / 1024
+        print(f"    model.json: {json_size:.1f} MB")
+
+        ubj_path = os.path.join(output_dir, "model.ubj")
+        model.save_model(ubj_path)
+        ubj_size = os.path.getsize(ubj_path) / 1024 / 1024
+        print(f"    model.ubj:  {ubj_size:.1f} MB")
+
+        bin_path = os.path.join(output_dir, "model.bin")
+        # Force legacy binary format for compatibility with the 'leaves' Go library
+        model.save_model(bin_path)
+        bin_size = os.path.getsize(bin_path) / 1024 / 1024
+        print(f"    model.bin:  {bin_size:.1f} MB (legacy format)")
+
 
     # Step 4: Train XGBoost
     params = {
