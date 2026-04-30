@@ -1,1 +1,0 @@
-docker run --rm -i --network="hisrael-xgboost-rinha-2026_rinha" -v ${PWD}/test:/scripts -w /scripts grafana/k6 run test.js
