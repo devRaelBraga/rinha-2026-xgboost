@@ -14,15 +14,17 @@ import (
 	"time"
 )
 
-var knnIndex *KNNIndex
+var ivfIndex *IVFIndex
 
 func main() {
 	runtime.GOMAXPROCS(1)
 	modelPath := flag.String("model", "/data/model.json", "Path to XGBoost model file")
 	normPath := flag.String("normalization", "/data/normalization.json", "Path to normalization.json")
 	mccPath := flag.String("mcc-risk", "/data/mcc_risk.json", "Path to mcc_risk.json")
-	vectorsPath := flag.String("vectors", "/data/refs_vectors.bin", "Path to KNN reference vectors")
-	labelsPath := flag.String("labels", "/data/refs_labels.bin", "Path to KNN reference labels")
+	centroidsPath := flag.String("centroids", "/data/centroids.bin", "Path to IVF centroids")
+	offsetsPath := flag.String("offsets", "/data/ivf_offsets.bin", "Path to IVF offsets")
+	vectorsPath := flag.String("vectors", "/data/ivf_vectors.bin", "Path to IVF reference vectors")
+	labelsPath := flag.String("labels", "/data/ivf_labels.bin", "Path to IVF reference labels")
 	port := flag.String("port", "8080", "HTTP port")
 	flag.Parse()
 
@@ -70,11 +72,11 @@ func main() {
 	}
 	defer predictor.Close()
 
-	// Load KNN index
-	log.Printf("Loading KNN index from %s and %s...", *vectorsPath, *labelsPath)
-	knnIndex, err = LoadKNNIndex(*vectorsPath, *labelsPath)
+	// Load IVF index
+	log.Printf("Loading IVF index from %s, %s, %s, %s...", *centroidsPath, *offsetsPath, *vectorsPath, *labelsPath)
+	ivfIndex, err = LoadIVFIndex(*centroidsPath, *offsetsPath, *vectorsPath, *labelsPath)
 	if err != nil {
-		log.Fatalf("Failed to load KNN index: %v", err)
+		log.Fatalf("Failed to load IVF index: %v", err)
 	}
 
 	// Mark as ready
