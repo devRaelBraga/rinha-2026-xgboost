@@ -15,8 +15,10 @@ services:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - sockets:/sockets
     depends_on:
-      - api1
-      - api2
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
     networks:
       - rinha
     deploy:
@@ -32,6 +34,11 @@ services:
       - INSTANCE_ID=1
     volumes:
       - sockets:/tmp/sockets
+    healthcheck:
+      test: [ "CMD-SHELL", "sleep 5 && exit 0" ]
+      interval: 5s
+      timeout: 10s
+      retries: 1
     networks:
       - rinha
     deploy:
@@ -47,6 +54,11 @@ services:
       - INSTANCE_ID=2
     volumes:
       - sockets:/tmp/sockets
+    healthcheck:
+      test: [ "CMD-SHELL", "sleep 5 && exit 0" ]
+      interval: 5s
+      timeout: 10s
+      retries: 1
     networks:
       - rinha
     deploy:
