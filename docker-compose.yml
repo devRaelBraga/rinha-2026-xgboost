@@ -21,6 +21,12 @@ services:
         condition: service_healthy
     networks:
       - rinha
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
@@ -34,13 +40,19 @@ services:
       - INSTANCE_ID=1
     volumes:
       - sockets:/tmp/sockets
-    healthcheck:
-      test: [ "CMD-SHELL", "sleep 5 && exit 0" ]
-      interval: 5s
-      timeout: 10s
-      retries: 1
     networks:
       - rinha
+    healthcheck:
+      test: [ "CMD-SHELL", "sleep 50 && curl -f --unix-socket /tmp/sockets/api1.sock http://localhost/ready" ]
+      interval: 2s
+      timeout: 60s
+      retries: 5
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
@@ -54,13 +66,19 @@ services:
       - INSTANCE_ID=2
     volumes:
       - sockets:/tmp/sockets
-    healthcheck:
-      test: [ "CMD-SHELL", "sleep 5 && exit 0" ]
-      interval: 5s
-      timeout: 10s
-      retries: 1
     networks:
       - rinha
+    healthcheck:
+      test: [ "CMD-SHELL", "sleep 50 && curl -f --unix-socket /tmp/sockets/api2.sock http://localhost/ready" ]
+      interval: 2s
+      timeout: 60s
+      retries: 5
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
